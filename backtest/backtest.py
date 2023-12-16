@@ -48,6 +48,8 @@ class Backtest:
             By default 'D', which means daily.
             if type is str, it will be used as the freq parameter of a Grouper.
             If type is Grouper, it will be used to the groupby object.
+            Note that the attribute label of the Grouper will be forced to be
+            set to 'left', to make sure the date index is valid.
         
         slippage : float, optional
             The slippage (transaction cost) of the backtest, by default 0.005.
