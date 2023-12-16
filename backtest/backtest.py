@@ -86,12 +86,13 @@ class Backtest:
         self.end_date = to_datetime(end_date)
 
         if isinstance(freq, str):
-            self.freq = Grouper(freq=freq, level='date')
+            self.freq = Grouper(freq=freq, level='date', label='left')
         else:
             assert isinstance(freq, Grouper), \
                 'freq should be a str or a Grouper.'
             self.freq = freq
             self.freq.level = 'date'
+            self.freq.label = 'left'
         
         self.slippage = slippage
         self.position = position
@@ -162,11 +163,11 @@ class Backtest:
             print('Calculating ranks...')
         
         test_data['rank'] = test_data_grouped['signal'].rank(ascending=False)
-        test_data['top'] = test_data_grouped['rank'].apply(
+        test_data['top'] = test_data_grouped['rank'].transform(
             lambda x: x <= int(len(x) * self.long_pct)
         )
         if self.short:
-            test_data['bottom'] = test_data_grouped['rank'].apply(
+            test_data['bottom'] = test_data_grouped['rank'].transform(
                 lambda x: 1 - x <= int(len(x) * self.short_pct)
             )
 
@@ -175,15 +176,13 @@ class Backtest:
         
         test_data['weight'] = 0
         if isinstance(self.weight_func, type(None)):
-            weight_func = lambda x: [1 / len(x)] * len(x)
+            weight_func = lambda x: 1 / len(x)
         else:
             weight_func = self.weight_func
-        long_weight = array(
-                test_data[test_data['top']].groupby(
-                level='date', group_keys=False).apply(
+        long_weight = test_data[test_data['top']].groupby(
+                level='date', group_keys=False).transform(
                 weight_func
-            ).explode()
-        )
+            )
         test_data.loc[test_data['top'], 'weight'] = long_weight
         
         if self.short:
@@ -191,44 +190,37 @@ class Backtest:
                 short_weight_func = weight_func
             else:
                 short_weight_func = self.short_weight_func
-            short_weight = array(
-                test_data[test_data['bottom']].groupby(
-                    level='date', group_keys=False).apply(
+            short_weight = test_data[test_data['bottom']].groupby(
+                    level='date', group_keys=False).transform(
                     short_weight_func
-                ).explode()
-            )
+                )
             test_data.loc[test_data['bottom'], 'weight'] = short_weight
 
         if verbose:
             print(f'Aggregating results with frequency being {self.freq.freq}...')
             print('(Note that a high frequency would take a long time...)')
         
-        if self.freq.freq == 'D':
-            test_data['signal_ret'] = test_data['future_ret'] * test_data['weight']
-            test_data['signal_ret'] -= self.slippage * abs(test_data['weight'])
-            portfolio_ret = test_data.groupby(level='date')['signal_ret'].sum()
-            net_val = (1 + portfolio_ret).cumprod() * self.position
-        else:
+        if self.freq.freq != 'D':
             test_data = test_data.groupby(
                 [self.freq, 'stk_id'], group_keys=False
                 ).agg(
                     {'weight': 'first', 'future_ret': lambda x: (1 + x).prod() - 1}
                 )
-            test_data['signal_ret'] = test_data['weight'] * test_data['future_ret']
-            test_data['signal_ret'] -= self.slippage * abs(test_data['weight'])
-            portfolio_ret = test_data.groupby(level='date')['signal_ret'].sum()
-            net_val = (1 + portfolio_ret).cumprod() * self.position
+
+        test_data['signal_ret'] = test_data['weight'] * test_data['future_ret']
+        # slippage adjustment, calculated by the absolute change of weights
+        delta_weight = test_data.groupby(level='stk_id')['weight'].diff()
+        delta_weight[delta_weight.isna()] = test_data.groupby(
+            level='stk_id'
+            )['weight'].first()
+        test_data['signal_ret'] -= self.slippage * abs(delta_weight)
+        portfolio_ret = test_data.groupby(level='date')['signal_ret'].sum()
+        net_val = (1 + portfolio_ret).cumprod() * self.position
 
         benchmark_ret = test_data.groupby(level='date')['future_ret'].mean()
         benchmark_ret -= self.slippage
         benchmark_val = (1 + benchmark_ret).cumprod() * self.position
 
-        col_names = [
-            'portfolio_ret',
-            'net_val',
-            'benchmark_ret',
-            'benchmark_val'
-        ]
         res = DataFrame({
             'portfolio_ret': portfolio_ret,
             'net_val': net_val,
@@ -249,8 +241,11 @@ class Backtest:
             }, index=[self.end_date]
             )
             res = concat([res, temp])
+        
         res = res.shift(1)
         res.iloc[0] = [0, self.position, 0, self.position]
+        # validate the start date
+        res.rename(index={res.index[0]: self.start_date}, inplace=True)
 
         return res
     
