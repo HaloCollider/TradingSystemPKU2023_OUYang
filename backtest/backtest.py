@@ -3,8 +3,14 @@
 from .dataloader import DataLoader
 from .strategy import Strategy
 from types import FunctionType
-from pandas import DataFrame, Series, concat, \
-    to_datetime, Grouper, Timedelta
+from pandas import (
+    DataFrame,
+    Series,
+    concat,
+    to_datetime,
+    Grouper,
+    Timedelta
+)
 from numpy import array
 import matplotlib.pyplot as plt
 
