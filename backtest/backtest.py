@@ -178,13 +178,15 @@ class Backtest:
         
         test_data['weight'] = 0
         if isinstance(self.weight_func, type(None)):
-            weight_func = lambda x: 1 / len(x)
+            weight_func = lambda x: [1 / len(x)] * len(x)
         else:
             weight_func = self.weight_func
-        long_weight = test_data[test_data['top']].groupby(
-                level='date', group_keys=False).transform(
+        long_weight = array(
+            test_data[test_data['top']].groupby(
+                level='date', group_keys=False).apply(
                 weight_func
-            )
+            ).explode()
+        )
         test_data.loc[test_data['top'], 'weight'] = long_weight
         
         if self.short:
@@ -192,10 +194,12 @@ class Backtest:
                 short_weight_func = weight_func
             else:
                 short_weight_func = self.short_weight_func
-            short_weight = test_data[test_data['bottom']].groupby(
-                    level='date', group_keys=False).transform(
+            short_weight = array(
+                test_data[test_data['bottom']].groupby(
+                    level='date', group_keys=False).apply(
                     short_weight_func
-                )
+                ).exlode()
+            )
             test_data.loc[test_data['bottom'], 'weight'] = short_weight
 
         if verbose:
